@@ -40,6 +40,15 @@ class MainActivity : AppCompatActivity() {
         webView.layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
+        // The page has its own pinch-to-zoom/pan on the schematic and PCB
+        // canvases (KiCanvas) -- WebView's own native page-zoom (pinch
+        // gesture + on-screen zoom controls) sits on top and steals
+        // two-finger touches before they reach the canvas, making the
+        // in-app zoom unusable. Disable it entirely so every pinch goes to
+        // the web content instead.
+        webView.settings.setSupportZoom(false)
+        webView.settings.builtInZoomControls = false
+        webView.settings.displayZoomControls = false
         webView.setBackgroundColor(android.graphics.Color.parseColor("#0B0D0C"))
         if (0 != (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE)) {
             // Lets `chrome://inspect` attach to this WebView on a connected

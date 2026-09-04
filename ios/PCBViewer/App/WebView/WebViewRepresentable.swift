@@ -20,6 +20,16 @@ struct WebViewRepresentable: UIViewControllerRepresentable {
         webView.scrollView.bounces = false
         webView.isOpaque = false
         webView.backgroundColor = .black
+
+        // The page has its own pinch-to-zoom/pan on the schematic and PCB
+        // canvases (KiCanvas) -- WKWebView's own page-zoom gesture recognizer
+        // sits on top and steals two-finger touches before they reach the
+        // canvas, making the in-app zoom unusable. Disable the native page
+        // zoom entirely so every pinch goes to the web content instead.
+        webView.scrollView.pinchGestureRecognizer?.isEnabled = false
+        webView.scrollView.minimumZoomScale = 1.0
+        webView.scrollView.maximumZoomScale = 1.0
+        webView.scrollView.bouncesZoom = false
         if #available(iOS 16.4, *) {
             // Lets Safari's Web Inspector attach to this WKWebView on a
             // connected iPad -- useful for confirming the app renders
