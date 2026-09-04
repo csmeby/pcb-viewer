@@ -71,7 +71,7 @@ export function BoardViewerPanel() {
 
   return (
     <div style={{ position: "relative", width: "100%", height: "100%" }}>
-      <canvas ref={canvasRef} style={{ width: "100%", height: "100%", display: "block" }} />
+      <canvas ref={canvasRef} style={canvasStyle} />
       <BoardLayersPanel viewer={viewer} />
       {!fileSystem && (
         <div style={overlayStyle}>Open a project to view its board.</div>
@@ -80,6 +80,15 @@ export function BoardViewerPanel() {
     </div>
   );
 }
+
+// touchAction: "none" stops the browser's own default touch gesture
+// handling (pinch-zoom, double-tap-zoom) for this canvas -- this is what
+// actually matters for pinch-to-zoom working on the board itself instead of
+// the whole page; disabling the native shells' page-zoom gesture recognizer
+// alone wasn't enough; it only blocks one of the two mechanisms (three.js's
+// OrbitControls sets this same property on its own canvas automatically,
+// which is why the 3D panel didn't have this problem).
+const canvasStyle: CSSProperties = { width: "100%", height: "100%", display: "block", touchAction: "none" };
 
 const overlayStyle: CSSProperties = {
   position: "absolute",

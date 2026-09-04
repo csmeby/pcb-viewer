@@ -71,7 +71,7 @@ export function SchematicViewerPanel() {
 
   return (
     <div style={{ position: "relative", width: "100%", height: "100%" }}>
-      <canvas ref={canvasRef} style={{ width: "100%", height: "100%", display: "block" }} />
+      <canvas ref={canvasRef} style={canvasStyle} />
       {!fileSystem && (
         <div style={overlayStyle}>Open a project to view its schematic.</div>
       )}
@@ -79,6 +79,9 @@ export function SchematicViewerPanel() {
     </div>
   );
 }
+
+// See BoardViewerPanel.tsx's identical constant for why touchAction: "none" matters here.
+const canvasStyle: CSSProperties = { width: "100%", height: "100%", display: "block", touchAction: "none" };
 
 const overlayStyle: CSSProperties = {
   position: "absolute",
