@@ -13,6 +13,8 @@ export interface PanelSpec {
   defaultSize?: number;
   /** Skip the default body padding -- for content (canvases, 3D views) that should fill edge to edge. */
   noPadding?: boolean;
+  /** Starts closed (reachable via the "+ <title>" reopen button) instead of claiming layout space on first load. */
+  defaultClosed?: boolean;
 }
 
 const MIN_SIZE = 12;
@@ -42,7 +44,10 @@ const MIN_SIZE = 12;
 export function PanelLayout({ panels }: { panels: PanelSpec[] }) {
   const groupRef = useRef<ImperativePanelGroupHandle>(null);
   const lastOpenSize = useRef<Map<string, number>>(new Map());
-  const [closedIds, setClosedIds] = useState<Set<string>>(new Set());
+  const [closedIds, setClosedIds] = useState<Set<string>>(
+    () => new Set(panels.filter((panel) => panel.defaultClosed).map((panel) => panel.id)),
+  );
+  const openPanelCount = panels.filter((panel) => !panel.defaultClosed).length || 1;
 
   function currentLayout(): number[] {
     return groupRef.current?.getLayout() ?? panels.map((panel) => panel.defaultSize ?? 100 / panels.length);
@@ -142,7 +147,7 @@ export function PanelLayout({ panels }: { panels: PanelSpec[] }) {
               )}
               <Panel
                 id={panel.id}
-                defaultSize={panel.defaultSize ?? 100 / panels.length}
+                defaultSize={panel.defaultClosed ? 0 : panel.defaultSize ?? 100 / openPanelCount}
                 minSize={MIN_SIZE}
                 collapsible
                 collapsedSize={0}

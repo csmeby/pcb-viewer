@@ -2,6 +2,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import type { BoardViewer } from "../../../web/vendor/kicanvas/src/viewers/board/viewer";
 import type { ViewLayer } from "../../../web/vendor/kicanvas/src/viewers/base/view-layers";
 import { LayerNames } from "../../../web/vendor/kicanvas/src/viewers/board/layers";
+import { isFrontLayer, isBackLayer } from "./boardLayerPredicates";
 
 /**
  * KiCad-style per-layer visibility toggles for the board viewer, floated
@@ -59,18 +60,10 @@ export function BoardLayersPanel({ viewer }: { viewer: BoardViewer | null }) {
             <button className="pcb-button" style={presetButtonStyle} onClick={() => setLayersVisible(() => false)}>
               None
             </button>
-            <button
-              className="pcb-button"
-              style={presetButtonStyle}
-              onClick={() => setLayersVisible((l) => l.name.startsWith("F.") || l.name === LayerNames.edge_cuts)}
-            >
+            <button className="pcb-button" style={presetButtonStyle} onClick={() => setLayersVisible(isFrontLayer)}>
               Front
             </button>
-            <button
-              className="pcb-button"
-              style={presetButtonStyle}
-              onClick={() => setLayersVisible((l) => l.name.startsWith("B.") || l.name === LayerNames.edge_cuts)}
-            >
+            <button className="pcb-button" style={presetButtonStyle} onClick={() => setLayersVisible(isBackLayer)}>
               Back
             </button>
             <button

@@ -2,6 +2,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { PanelLayout } from "./layout/PanelLayout";
 import { TopBar } from "./layout/TopBar";
 import { BoardViewerPanel } from "./viewers/BoardViewerPanel";
+import { Board3DViewerPanel } from "./viewers/Board3DViewerPanel";
 import { SchematicViewerPanel } from "./viewers/SchematicViewerPanel";
 import { BomPanel } from "./bom/BomPanel";
 import { ErrorBoundary } from "./diagnostics/ErrorBoundary";
@@ -57,6 +58,17 @@ export function App() {
               content: (
                 <ErrorBoundary label="PCB">
                   <BoardViewerPanel />
+                </ErrorBoundary>
+              ),
+            },
+            {
+              id: "3d",
+              title: "3D",
+              noPadding: true,
+              defaultClosed: true,
+              content: (
+                <ErrorBoundary label="3D">
+                  <Board3DViewerPanel />
                 </ErrorBoundary>
               ),
             },
