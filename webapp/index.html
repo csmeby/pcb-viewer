@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>PCB Viewer</title>
+  </head>
+  <body>
+    <div id="root">Loading&hellip;</div>
+    <script>
+      // Plain classic script, runs before the app bundle is even requested
+      // (a classic script always executes ahead of a later script in parse
+      // order) -- so these listeners are live for anything that goes wrong
+      // in the bundle, including a synchronous throw during its own
+      // top-level code, which happens before that bundle's own error
+      // listeners (if any, see ErrorBoundary.tsx) could ever register.
+      // Forwards to native Diagnostics when running inside the iOS or
+      // Android shell (see NativeBridge.swift's / WebAppBridge.kt's
+      // "jsError" case); harmless no-op in a plain browser, where neither
+      // bridge is present.
+      function pcbEarlyDiagnostic(message) {
+        try {
+          window.webkit.messageHandlers.pcbBridge.postMessage({ type: "jsError", message: message });
+        } catch (e) {
+          try {
+            window.AndroidPcbBridge.postMessage(JSON.stringify({ type: "jsError", message: message }));
+          } catch (e2) {
+            // No bridge (running outside the native shell).
+          }
+        }
+      }
+      window.addEventListener("error", function (event) {
+        pcbEarlyDiagnostic("window error: " + event.message + " (" + event.filename + ":" + event.lineno + ":" + event.colno + ")");
+      });
+      window.addEventListener("unhandledrejection", function (event) {
+        var reason = event.reason;
+        var detail = reason && reason.stack ? reason.stack : String(reason);
+        pcbEarlyDiagnostic("unhandledrejection: " + detail);
+      });
+    </script>
+    <script type="module" src="/src/main.tsx" onerror="pcbEarlyDiagnostic('app bundle failed to load as a resource')"></script>
+  </body>
+</html>

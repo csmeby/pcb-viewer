@@ -1,0 +1,38 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": false,
+    "experimentalDecorators": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+
+    // Vendored KiCanvas source (../web/vendor/kicanvas, shared with the
+    // web/ app rather than duplicated) is imported directly by path, so it's
+    // part of this same compilation and has to satisfy these options too --
+    // mirrors web/tsconfig.json exactly for that reason.
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "noImplicitThis": true,
+    "useUnknownInCatchVariables": true,
+    "alwaysStrict": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "src",
+    "vite.config.ts",
+    "../web/vendor/kicanvas/src/**/*.d.ts"
+  ]
+}

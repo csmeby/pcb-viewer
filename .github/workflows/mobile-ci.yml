@@ -1,0 +1,139 @@
+name: Mobile CI
+
+
+on:
+  push:
+    paths:
+      - "ios/**"
+      - "webapp/**"
+      - "web/vendor/**"
+      - ".github/workflows/mobile-ci.yml"
+  pull_request:
+    paths:
+      - "ios/**"
+      - "webapp/**"
+      - "web/vendor/**"
+      - ".github/workflows/mobile-ci.yml"
+
+env:
+  BUNDLE_ID: "com.csmeby.pcbviewer"
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      # submodules: recursive -- web/vendor/kicanvas is a pinned git
+      # submodule (KiCanvas's own source, imported directly rather than as
+      # a prebuilt package -- see webapp/src/viewers/BoardViewerPanel.tsx).
+      # webapp/ itself has no submodule of its own; it imports web/vendor/kicanvas
+      # via a relative path, so this single checkout covers both.
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Find an available iPad simulator
+        run: |
+          DEVICE_LINE=$(xcrun simctl list devices available | grep -m1 "iPad")
+          if [ -z "$DEVICE_LINE" ]; then
+            echo "::error::No available iPad simulator found on this runner."
+            xcrun simctl list devices available
+            exit 1
+          fi
+          DEVICE_NAME=$(echo "$DEVICE_LINE" | sed -E 's/^[[:space:]]*(.+) \([0-9A-Fa-f-]+\) \([A-Za-z]+\)[[:space:]]*$/\1/')
+          echo "Using simulator: $DEVICE_NAME"
+          echo "SIMULATOR_NAME=$DEVICE_NAME" >> "$GITHUB_ENV"
+          echo "SIMULATOR_DESTINATION=platform=iOS Simulator,name=$DEVICE_NAME,OS=latest" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: webapp/package-lock.json
+
+      - name: Install web app dependencies
+        working-directory: webapp
+        run: npm ci
+
+      - name: Typecheck web app
+        working-directory: webapp
+        run: npm run typecheck
+
+      - name: Build web app
+        working-directory: webapp
+        run: npm run build
+
+      - name: Copy web build into iOS resources
+        run: |
+          rm -rf ios/PCBViewer/Resources/WebAssets
+          mkdir -p ios/PCBViewer/Resources/WebAssets
+          cp -r webapp/dist/. ios/PCBViewer/Resources/WebAssets/
+
+      # Not preinstalled on macos-latest as a guarantee.
+      - name: Install XcodeGen
+        run: |
+          export HOMEBREW_NO_AUTO_UPDATE=1
+          brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Build (iOS Simulator, unsigned)
+        working-directory: ios
+        run: |
+          xcodebuild build \
+            -project PCBViewer.xcodeproj \
+            -scheme PCBViewer \
+            -destination "$SIMULATOR_DESTINATION" \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Boot simulator
+        run: |
+          xcrun simctl boot "$SIMULATOR_NAME" || true
+          xcrun simctl bootstatus "$SIMULATOR_NAME" -b
+
+      - name: Install and launch app
+        working-directory: ios
+        run: |
+          APP_PATH=$(find build/Build/Products -maxdepth 2 -name "PCBViewer.app" | head -n1)
+          if [ -z "$APP_PATH" ]; then
+            echo "::error::Could not find built PCBViewer.app under ios/build/Build/Products"
+            exit 1
+          fi
+          echo "Installing $APP_PATH"
+          xcrun simctl install "$SIMULATOR_NAME" "$APP_PATH"
+          xcrun simctl launch "$SIMULATOR_NAME" "$BUNDLE_ID"
+
+      # Gives the WKWebView time to load pcbapp://app/index.html and complete
+      # its ping/pong round trip with native before the screenshot is taken.
+      - name: Wait for app to render
+        run: sleep 5
+
+      # Cheap but real "did anything actually render" check -- this is
+      # exactly the class of failure (build succeeds, runtime silently shows
+      # nothing) that sank the previous architecture with no signal in CI.
+      # This only proves "not a flat/blank screen", not "shows the right
+      # content" -- a proper XCUITest asserting the on-screen status text is
+      # a good future strengthening of this check.
+      - name: Screenshot and sanity-check non-blank render
+        run: |
+          xcrun simctl io "$SIMULATOR_NAME" screenshot screenshot.png
+          SIZE=$(stat -f%z screenshot.png)
+          echo "Screenshot size: $SIZE bytes"
+          if [ "$SIZE" -lt 20000 ]; then
+            echo "::error::Screenshot is suspiciously small ($SIZE bytes) -- likely a blank/flat screen, not a real render."
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mobile-ci-screenshot
+          path: screenshot.png
+          retention-days: 14

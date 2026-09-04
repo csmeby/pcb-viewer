@@ -1,0 +1,99 @@
+name: Android CI
+
+on:
+  push:
+    paths:
+      - "android/**"
+      - "webapp/**"
+      - "web/vendor/**"
+      - ".github/workflows/android-ci.yml"
+  pull_request:
+    paths:
+      - "android/**"
+      - "webapp/**"
+      - "web/vendor/**"
+      - ".github/workflows/android-ci.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # submodules: recursive -- web/vendor/kicanvas is a pinned git
+      # submodule the webapp build imports via a relative path (see
+      # mobile-ci.yml's identical comment on this).
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: webapp/package-lock.json
+
+      - name: Install web app dependencies
+        working-directory: webapp
+        run: npm ci
+
+      - name: Typecheck web app
+        working-directory: webapp
+        run: npm run typecheck
+
+      - name: Build web app
+        working-directory: webapp
+        run: npm run build
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "21"
+
+      - name: Enable KVM (hardware-accelerated emulator)
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Assemble debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      # Cheap but real "did anything actually render" check, matching
+      # mobile-ci.yml's iOS equivalent -- this is exactly the class of
+      # failure (build succeeds, runtime silently shows nothing) that a pure
+      # compile check misses.
+      - name: Boot emulator, install, launch, and screenshot
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          working-directory: android
+          script: |
+            adb install app/build/outputs/apk/debug/app-debug.apk
+            adb shell am start -n com.csmeby.pcbviewer/.MainActivity
+            sleep 5
+            adb exec-out screencap -p > ../screenshot.png
+
+      - name: Sanity-check non-blank render
+        run: |
+          SIZE=$(stat -c%s screenshot.png)
+          echo "Screenshot size: $SIZE bytes"
+          if [ "$SIZE" -lt 20000 ]; then
+            echo "::error::Screenshot is suspiciously small ($SIZE bytes) -- likely a blank/flat screen, not a real render."
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-ci-screenshot
+          path: screenshot.png
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcb-viewer-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14

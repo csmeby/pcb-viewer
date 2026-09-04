@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches webapp/src/styles/theme.css's bg-app custom property, so the
+         launcher icon background and the native window behind the WebView
+         match the app's own dark theme instead of flashing white before load. -->
+    <color name="app_background">#0B0D0C</color>
+    <color name="ic_launcher_background">#0B0D0C</color>
+</resources>

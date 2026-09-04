@@ -1,0 +1,65 @@
+name: PCBViewer
+
+options:
+  bundleIdPrefix: com.csmeby
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+
+configs:
+  Debug: debug
+  Release: release
+
+targets:
+  PCBViewer:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: PCBViewer/App
+      # WebAssets must land in the bundle as a single folder reference (not
+      # flattened into individual resource files) -- LocalSchemeHandler.swift
+      # looks it up by name via Bundle.main.url(forResource: "WebAssets", ...)
+      # and needs the webapp/dist directory structure (assets/, index.html)
+      # intact underneath it.
+      - path: PCBViewer/Resources/WebAssets
+        type: folder
+        buildPhase: resources
+      - path: PCBViewer/Resources/Assets.xcassets
+        buildPhase: resources
+    info:
+      path: Generated/Info.plist
+      properties:
+        CFBundleDisplayName: PCB Viewer
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen: {}
+        UIRequiresFullScreen: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.csmeby.pcbviewer
+        PRODUCT_NAME: PCBViewer
+        # MARKETING_VERSION/CURRENT_PROJECT_VERSION are read back above as
+        # $(...) variable references (not baked literals) specifically so
+        # `xcodebuild archive ... CURRENT_PROJECT_VERSION=<n>` can override
+        # the build number at archive time -- see
+        # .github/workflows/signed-mobile-build.yaml's comment on this.
+        MARKETING_VERSION: "4.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SWIFT_VERSION: "5.0"
+        ENABLE_PREVIEWS: true
+        GENERATE_INFOPLIST_FILE: false

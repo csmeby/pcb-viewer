@@ -1,0 +1,239 @@
+name: Signed mobile build (TestFlight)
+
+# Ground-up rebuild: builds the same plain Swift/SwiftUI + WKWebView app as
+# mobile-ci.yml, then signs/archives/exports/uploads it -- replacing the
+# deleted React Native/Expo attempt's version of this workflow entirely.
+# Reuses the SAME signing secrets and the SAME bundle identifier
+# (com.csmeby.pcbviewer) as every prior version of this workflow, so no new
+# provisioning profile or App Store Connect app record is needed:
+#   BUILD_CERTIFICATE_BASE64, P12_PASSWORD, BUILD_PROVISION_PROFILE_BASE64,
+#   KEYCHAIN_PASSWORD, APPLE_TEAM_ID, APP_STORE_CONNECT_API_KEY_BASE64,
+#   APP_STORE_CONNECT_KEY_ID, APP_STORE_CONNECT_ISSUER_ID
+#
+# Bundle-ID reuse has one real consequence: App Store Connect requires build
+# numbers to keep increasing across EVERY upload for a given app record,
+# including this app's own previous (SwiftUI, then RN) uploads. Build number
+# is this workflow's own run number (${{ github.run_number }}: 1, 2, 3, ...,
+# incrementing on every run of THIS workflow file) -- a plain, predictable
+# integer rather than a UTC timestamp. NOTE: if a previous upload for this
+# bundle ID used a larger number (the old timestamp scheme produced ~14-digit
+# numbers), App Store Connect will reject the first upload under this new
+# scheme until run_number catches back up past it -- bump MARKETING_VERSION
+# and/or the starting run_number if that happens. See ios/project.yml's
+# comment on MARKETING_VERSION/CURRENT_PROJECT_VERSION:
+# XcodeGen's default Info.plist bakes CFBundleVersion as a literal "1", not a
+# $(CURRENT_PROJECT_VERSION) build-variable reference, so project.yml
+# explicitly sets both to the variable-reference form -- only then does the
+# `CURRENT_PROJECT_VERSION=...` override on the archive command below
+# actually take effect. (The Expo-era version of this workflow hit the exact
+# same class of bug for a different underlying reason -- Expo's generated
+# Info.plist baked a literal value from app.json instead.)
+
+on:
+  workflow_dispatch:
+  # Auto-chained after Mobile CI (see mobile-ci.yml) succeeds on master.
+  workflow_run:
+    workflows: ["Mobile CI"]
+    types: [completed]
+    branches: [master]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+          submodules: recursive
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: webapp/package-lock.json
+
+      - name: Install web app dependencies
+        working-directory: webapp
+        run: npm ci
+
+      - name: Build web app
+        working-directory: webapp
+        run: npm run build
+
+      - name: Copy web build into iOS resources
+        run: |
+          rm -rf ios/PCBViewer/Resources/WebAssets
+          mkdir -p ios/PCBViewer/Resources/WebAssets
+          cp -r webapp/dist/. ios/PCBViewer/Resources/WebAssets/
+
+      - name: Install XcodeGen
+        run: |
+          export HOMEBREW_NO_AUTO_UPDATE=1
+          brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Import signing certificate and provisioning profile
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          CERT_PATH=$RUNNER_TEMP/build_certificate.p12
+          PROFILE_PATH=$RUNNER_TEMP/build_profile.mobileprovision
+          KEYCHAIN_PATH=$RUNNER_TEMP/signing.keychain-db
+
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o "$CERT_PATH"
+          echo -n "$BUILD_PROVISION_PROFILE_BASE64" | base64 --decode -o "$PROFILE_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain
+
+          mkdir -p ~/Library/MobileDevice/"Provisioning Profiles"
+          cp "$PROFILE_PATH" ~/Library/MobileDevice/"Provisioning Profiles"/build_profile.mobileprovision
+
+      - name: Read profile UUID/bundle ID
+        id: profile
+        run: |
+          PROFILE_PATH=$RUNNER_TEMP/build_profile.mobileprovision
+          PLIST_PATH=$RUNNER_TEMP/profile.plist
+          security cms -D -i "$PROFILE_PATH" > "$PLIST_PATH"
+
+          UUID=$(/usr/libexec/PlistBuddy -c "Print :UUID" "$PLIST_PATH")
+          APP_ID=$(/usr/libexec/PlistBuddy -c "Print :Entitlements:application-identifier" "$PLIST_PATH")
+          BUNDLE_ID=${APP_ID#*.}
+
+          echo "uuid=$UUID" >> "$GITHUB_OUTPUT"
+          echo "bundle_id=$BUNDLE_ID" >> "$GITHUB_OUTPUT"
+          echo "Profile UUID: $UUID"
+          echo "Bundle ID: $BUNDLE_ID"
+
+      - name: Build signed archive
+        working-directory: ios
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          PROFILE_UUID: ${{ steps.profile.outputs.uuid }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          echo "Using build number $BUILD_NUMBER"
+
+          xcodebuild archive \
+            -project PCBViewer.xcodeproj \
+            -scheme PCBViewer \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath build/PCBViewer.xcarchive \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_UUID" \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
+
+      - name: Print archived app's version
+        working-directory: ios
+        run: |
+          APP_PATH=$(find build/PCBViewer.xcarchive/Products/Applications -maxdepth 1 -name "*.app" | head -n1)
+          echo "CFBundleVersion:"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP_PATH/Info.plist"
+          echo "CFBundleShortVersionString:"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP_PATH/Info.plist"
+
+      # Equivalent of the old RN-era "Verify JS bundle was embedded" check,
+      # adapted to this architecture: the WKWebView loads everything from
+      # ios/PCBViewer/Resources/WebAssets (copied into the bundle above), so
+      # a missing/empty index.html here is this app's version of the same
+      # "build succeeded but the app shows nothing at launch" failure mode.
+      - name: Verify web assets were embedded
+        working-directory: ios
+        run: |
+          APP_PATH=$(find build/PCBViewer.xcarchive/Products/Applications -maxdepth 1 -name "*.app" | head -n1)
+          INDEX_PATH="$APP_PATH/WebAssets/index.html"
+          if [ ! -f "$INDEX_PATH" ]; then
+            echo "::error::WebAssets/index.html is missing from the archived app -- the WKWebView has nothing to load. This is the most likely cause of a blank-screen-forever launch."
+            find "$APP_PATH" -maxdepth 1
+            exit 1
+          fi
+          SIZE=$(stat -f%z "$INDEX_PATH")
+          echo "index.html size: $SIZE bytes"
+          if [ "$SIZE" -lt 100 ]; then
+            echo "::error::index.html is suspiciously small ($SIZE bytes) -- likely an empty or failed web build, not a real app."
+            exit 1
+          fi
+
+      - name: Write ExportOptions.plist
+        working-directory: ios
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          PROFILE_UUID: ${{ steps.profile.outputs.uuid }}
+          BUNDLE_ID: ${{ steps.profile.outputs.bundle_id }}
+        run: |
+          cat > ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>teamID</key>
+            <string>${APPLE_TEAM_ID}</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>${BUNDLE_ID}</key>
+              <string>${PROFILE_UUID}</string>
+            </dict>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Export signed .ipa
+        working-directory: ios
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath build/PCBViewer.xcarchive \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath build/ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcb-viewer-signed-ipa
+          path: ios/build/ipa/*.ipa
+          retention-days: 14
+
+      - name: Upload to App Store Connect
+        env:
+          APP_STORE_CONNECT_API_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_BASE64 }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          IPA_PATH=$(find ios/build/ipa -name "*.ipa" | head -n1)
+
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo -n "$APP_STORE_CONNECT_API_KEY_BASE64" | base64 --decode \
+            -o ~/.appstoreconnect/private_keys/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8
+
+          xcrun altool --upload-app \
+            --type ios \
+            --file "$IPA_PATH" \
+            --apiKey "$APP_STORE_CONNECT_KEY_ID" \
+            --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID"
+
+      - name: Clean up keychain
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+          rm -rf ~/.appstoreconnect/private_keys || true

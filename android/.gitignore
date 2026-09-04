@@ -1,0 +1,13 @@
+*.iml
+.gradle/
+/local.properties
+.idea/
+build/
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# Populated from webapp/dist by the copyWebAssets Gradle task -- not source.
+app/src/main/assets/*
+!app/src/main/assets/.gitkeep
