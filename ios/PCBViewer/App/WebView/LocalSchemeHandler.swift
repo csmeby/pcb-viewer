@@ -55,12 +55,27 @@ final class LocalSchemeHandler: NSObject, WKURLSchemeHandler {
             guard let self else { return }
             do {
                 let data = try Data(contentsOf: fileURL)
-                let response = URLResponse(
+                // Must be an HTTPURLResponse, not a plain URLResponse -- the
+                // page's fetch() reads response.status/response.ok, and a
+                // bare URLResponse has no status code (JS sees status 0,
+                // ok=false), which is exactly what made
+                // NativeProjectFileSystem.get() fail with "HTTP 0" for every
+                // project file. Only the JS-visible fetch() path (project
+                // files) hits this -- webView.load()'s own navigation for
+                // /app/* doesn't inspect response.status, which is why the
+                // app itself loaded fine despite this bug.
+                guard let response = HTTPURLResponse(
                     url: url,
-                    mimeType: Self.mimeType(for: fileURL.pathExtension),
-                    expectedContentLength: data.count,
-                    textEncodingName: nil
-                )
+                    statusCode: 200,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: [
+                        "Content-Type": Self.mimeType(for: fileURL.pathExtension),
+                        "Content-Length": String(data.count),
+                    ]
+                ) else {
+                    self.finish(id: id) { task.didFailWithError(URLError(.badServerResponse)) }
+                    return
+                }
                 self.finish(id: id) {
                     task.didReceive(response)
                     task.didReceive(data)
