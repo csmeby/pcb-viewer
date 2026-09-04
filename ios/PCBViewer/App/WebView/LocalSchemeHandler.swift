@@ -120,6 +120,13 @@ final class LocalSchemeHandler: NSObject, WKURLSchemeHandler {
         case "jpg", "jpeg": return "image/jpeg"
         case "woff": return "font/woff"
         case "woff2": return "font/woff2"
+        // occt-import-js (STEP parser for 3D component models) needs this
+        // exact MIME type for its WASM streaming-compile fast path -- a
+        // generic octet-stream response makes it fall back to a slower
+        // (but still correct) ArrayBuffer path, so this isn't strictly
+        // required for correctness, just performance, but it's a one-line
+        // fix for a demonstrated real failure mode in bundler contexts.
+        case "wasm": return "application/wasm"
         case "kicad_pcb", "kicad_sch", "kicad_pro", "kicad_wks", "kicad_mod": return "text/plain"
         default: return "application/octet-stream"
         }

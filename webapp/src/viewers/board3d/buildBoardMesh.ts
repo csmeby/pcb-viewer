@@ -1,24 +1,31 @@
 import * as THREE from "three";
 import type { KicadPCB } from "../../../../web/vendor/kicanvas/src/kicad/board";
 import type { BoardTheme } from "../../../../web/vendor/kicanvas/src/kicad";
+import type { IFileSystem } from "../../../../web/vendor/kicanvas/src/kicanvas/services/vfs";
 import { edgeCutsToShape, type BoardOutline } from "./edgeCutsToShape";
 import { renderFrontAndBackTextures } from "./renderLayerTexture";
 import { isFrontLayer, isBackLayer } from "../boardLayerPredicates";
+import { placeFootprintModels } from "./placeFootprintModels";
 
 /** mm -> scene units. 1:1 -- there's nothing else in the scene to be consistent with, so real millimeters is the simplest choice. */
 const MM = 1;
 
 /**
- * Builds the extruded 3D board slab: true thickness (KicadPCB.general.thickness,
- * default 1.6mm), with the top/bottom faces textured from the existing 2D
- * renderer's own front/back render (see renderLayerTexture.ts) so real
- * copper/silkscreen/soldermask detail shows up in 3D, and the side walls
- * colored from the board theme's edge_cuts color.
- *
- * No component models yet (Phase A) -- see the 3D-viewer plan for the
- * project-bundled and network-fetched-standard-library follow-up phases.
+ * Builds the full 3D board: an extruded slab (true thickness --
+ * KicadPCB.general.thickness, default 1.6mm -- with the top/bottom faces
+ * textured from the existing 2D renderer's own front/back render, see
+ * renderLayerTexture.ts, so real copper/silkscreen/soldermask detail shows
+ * up in 3D, and the side walls colored from the board theme's edge_cuts
+ * color) plus every footprint's real component model on top of it (or a
+ * placeholder box where a model can't be resolved/parsed -- see
+ * placeFootprintModels.ts for both).
  */
-export async function buildBoardMesh(board: KicadPCB, theme: BoardTheme): Promise<THREE.Group> {
+export async function buildBoardMesh(
+  board: KicadPCB,
+  theme: BoardTheme,
+  fileSystem: IFileSystem,
+  onModelProgress?: (done: number, total: number) => void,
+): Promise<THREE.Group> {
   const outline = edgeCutsToShape(board) ?? rectangleFallback(board);
   const thickness = (board.general?.thickness ?? 1.6) * MM;
 
@@ -71,13 +78,21 @@ export async function buildBoardMesh(board: KicadPCB, theme: BoardTheme): Promis
   const sideMaterial = new THREE.MeshStandardMaterial({ color: edgeColor, roughness: 0.9 });
 
   const mesh = new THREE.Mesh(geometry, [bottomMaterial, topMaterial, sideMaterial]);
-  // Board space is X-right/Y-down (screen-like, matching the 2D viewer);
-  // three.js is X-right/Y-up/Z-toward-viewer by convention for OrbitControls'
-  // default up vector, so rotate into that instead of fighting the camera.
-  mesh.rotation.x = -Math.PI / 2;
 
+  const componentsGroup = await placeFootprintModels(board, thickness, fileSystem, onModelProgress);
+
+  // Both the slab and the components group above are built in the same raw
+  // board-space (X-right/Y-down, matching the file directly; Z = 0..thickness
+  // is board height) -- placeFootprintModels.ts's own file-level comment has
+  // the full derivation for why component placement uses this convention
+  // rather than copying KiCad's own (reflected) one verbatim. three.js is
+  // X-right/Y-up/Z-toward-viewer by convention for OrbitControls' default up
+  // vector, so the WHOLE assembly rotates into that once here, rather than
+  // each piece separately (which would risk them drifting out of alignment).
   const group = new THREE.Group();
   group.add(mesh);
+  group.add(componentsGroup);
+  group.rotation.x = -Math.PI / 2;
   return group;
 }
 

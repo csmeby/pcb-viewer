@@ -7,17 +7,20 @@ import themes from "../../../web/vendor/kicanvas/src/kicanvas/themes";
 import { buildBoardMesh } from "./board3d/buildBoardMesh";
 
 /**
- * 3D board viewer -- Phase A: an extruded slab textured from the existing 2D
- * renderer's own front/back render (see board3d/buildBoardMesh.ts), no
- * component models yet. Follows BoardViewerPanel.tsx's conventions (manifest/
- * fileSystem from the project store, same loading/error/empty overlays), but
- * owns a three.js scene instead of handing the canvas to the vendored 2D viewer.
+ * 3D board viewer: an extruded slab textured from the existing 2D renderer's
+ * own front/back render, plus every footprint's real component model (or a
+ * placeholder box where one can't be resolved/parsed) -- see
+ * board3d/buildBoardMesh.ts and board3d/placeFootprintModels.ts. Follows
+ * BoardViewerPanel.tsx's conventions (manifest/fileSystem from the project
+ * store, same loading/error/empty overlays), but owns a three.js scene
+ * instead of handing the canvas to the vendored 2D viewer.
  */
 export function Board3DViewerPanel() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const { fileSystem, manifest } = useProjectStore();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -54,6 +57,7 @@ export function Board3DViewerPanel() {
     }
 
     async function run() {
+      setProgress(null);
       try {
         const pcbPath = manifest!.files.find((path) => path.endsWith(".kicad_pcb"));
         if (!pcbPath) {
@@ -66,7 +70,11 @@ export function Board3DViewerPanel() {
         if (disposed) return;
 
         const board = new KicadPCB(pcbPath, text);
-        const boardGroup = await buildBoardMesh(board, themes.by_name("kicad").board);
+        const boardGroup = await buildBoardMesh(board, themes.by_name("kicad").board, fileSystem!, (done, total) => {
+          if (!disposed) {
+            setProgress({ done, total });
+          }
+        });
         if (disposed) {
           return;
         }
@@ -168,7 +176,11 @@ export function Board3DViewerPanel() {
     <div style={{ position: "relative", width: "100%", height: "100%" }}>
       <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
       {!fileSystem && <div style={overlayStyle}>Open a project to view its board in 3D.</div>}
-      {loading && !error && <div style={overlayStyle}>Building 3D view&hellip;</div>}
+      {loading && !error && (
+        <div style={overlayStyle}>
+          {progress && progress.total > 0 ? `Loading components… (${progress.done}/${progress.total})` : "Building 3D view…"}
+        </div>
+      )}
       {error && <div style={{ ...overlayStyle, color: "var(--danger)" }}>{error}</div>}
     </div>
   );
